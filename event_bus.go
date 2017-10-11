@@ -17,7 +17,7 @@ type BusSubscriber interface {
 
 //BusPublisher defines publishing-related bus behavior
 type BusPublisher interface {
-	Publish(topic string, args ...interface{})
+	Publish(topic string, args ...interface{}) error
 }
 
 //BusController defines bus control behavior (checking handler's presence, synchronization)
@@ -45,7 +45,7 @@ type eventHandler struct {
 	flagOnce      bool
 	async         bool
 	transactional bool
-	sync.Mutex // lock for an event handler - useful for running async callbacks serially
+	sync.Mutex    // lock for an event handler - useful for running async callbacks serially
 }
 
 // New returns new EventBus with empty handlers.
@@ -128,7 +128,7 @@ func (bus *EventBus) Unsubscribe(topic string, handler interface{}) error {
 }
 
 // Publish executes callback defined for a topic. Any additional argument will be transferred to the callback.
-func (bus *EventBus) Publish(topic string, args ...interface{}) {
+func (bus *EventBus) Publish(topic string, args ...interface{}) error {
 	bus.lock.Lock() // will unlock if handler is not found or always after setUpPublish
 	defer bus.lock.Unlock()
 	if handlers, ok := bus.handlers[topic]; ok && 0 < len(handlers) {
@@ -141,7 +141,9 @@ func (bus *EventBus) Publish(topic string, args ...interface{}) {
 				bus.removeHandler(topic, i)
 			}
 			if !handler.async {
-				bus.doPublish(handler, topic, args...)
+				if err := bus.doPublish(handler, topic, args...); err != nil {
+					return err
+				}
 			} else {
 				bus.wg.Add(1)
 				if handler.transactional {
@@ -151,11 +153,19 @@ func (bus *EventBus) Publish(topic string, args ...interface{}) {
 			}
 		}
 	}
+	return nil
 }
 
-func (bus *EventBus) doPublish(handler *eventHandler, topic string, args ...interface{}) {
+func (bus *EventBus) doPublish(handler *eventHandler, topic string, args ...interface{}) error {
 	passedArguments := bus.setUpPublish(topic, args...)
-	handler.callBack.Call(passedArguments)
+	values := handler.callBack.Call(passedArguments)
+	if len(values) == 1 {
+		switch err := values[0].Interface().(type) {
+		case error:
+			return err
+		}
+	}
+	return nil
 }
 
 func (bus *EventBus) doPublishAsync(handler *eventHandler, topic string, args ...interface{}) {

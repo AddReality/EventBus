@@ -1,6 +1,7 @@
 package EventBus
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
@@ -151,6 +152,25 @@ func TestSubscribeAsync(t *testing.T) {
 	time.Sleep(10 * time.Millisecond)
 
 	if numResults != 2 {
+		t.Fail()
+	}
+}
+
+func TestPublishError(t *testing.T) {
+	bus := New()
+	bus.Subscribe("topic", func(ok bool) error {
+		if ok {
+			return errors.New("Has error")
+		}
+		return nil
+	})
+	var err error
+	err = bus.Publish("topic", false)
+	if err != nil {
+		t.Fail()
+	}
+	err = bus.Publish("topic", true)
+	if err == nil {
 		t.Fail()
 	}
 }
