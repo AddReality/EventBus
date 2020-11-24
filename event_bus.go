@@ -36,7 +36,7 @@ type Bus interface {
 // EventBus - box for handlers and callbacks.
 type EventBus struct {
 	handlers map[string][]*eventHandler
-	lock     sync.Mutex // a lock for the map
+	lock     sync.RWMutex // a lock for the map
 	wg       sync.WaitGroup
 }
 
@@ -45,14 +45,14 @@ type eventHandler struct {
 	flagOnce      bool
 	async         bool
 	transactional bool
-	sync.Mutex    // lock for an event handler - useful for running async callbacks serially
+	sync.RWMutex    // lock for an event handler - useful for running async callbacks serially
 }
 
 // New returns new EventBus with empty handlers.
 func New() Bus {
 	b := &EventBus{
 		make(map[string][]*eventHandler),
-		sync.Mutex{},
+		sync.RWMutex{},
 		sync.WaitGroup{},
 	}
 	return Bus(b)
@@ -73,7 +73,7 @@ func (bus *EventBus) doSubscribe(topic string, fn interface{}, handler *eventHan
 // Returns error if `fn` is not a function.
 func (bus *EventBus) Subscribe(topic string, fn interface{}) error {
 	return bus.doSubscribe(topic, fn, &eventHandler{
-		reflect.ValueOf(fn), false, false, false, sync.Mutex{},
+		reflect.ValueOf(fn), false, false, false, sync.RWMutex{},
 	})
 }
 
@@ -83,7 +83,7 @@ func (bus *EventBus) Subscribe(topic string, fn interface{}) error {
 // Returns error if `fn` is not a function.
 func (bus *EventBus) SubscribeAsync(topic string, fn interface{}, transactional bool) error {
 	return bus.doSubscribe(topic, fn, &eventHandler{
-		reflect.ValueOf(fn), false, true, transactional, sync.Mutex{},
+		reflect.ValueOf(fn), false, true, transactional, sync.RWMutex{},
 	})
 }
 
@@ -91,7 +91,7 @@ func (bus *EventBus) SubscribeAsync(topic string, fn interface{}, transactional 
 // Returns error if `fn` is not a function.
 func (bus *EventBus) SubscribeOnce(topic string, fn interface{}) error {
 	return bus.doSubscribe(topic, fn, &eventHandler{
-		reflect.ValueOf(fn), true, false, false, sync.Mutex{},
+		reflect.ValueOf(fn), true, false, false, sync.RWMutex{},
 	})
 }
 
@@ -100,7 +100,7 @@ func (bus *EventBus) SubscribeOnce(topic string, fn interface{}) error {
 // Returns error if `fn` is not a function.
 func (bus *EventBus) SubscribeOnceAsync(topic string, fn interface{}) error {
 	return bus.doSubscribe(topic, fn, &eventHandler{
-		reflect.ValueOf(fn), true, true, false, sync.Mutex{},
+		reflect.ValueOf(fn), true, true, false, sync.RWMutex{},
 	})
 }
 
@@ -129,8 +129,8 @@ func (bus *EventBus) Unsubscribe(topic string, handler interface{}) error {
 
 // Publish executes callback defined for a topic. Any additional argument will be transferred to the callback.
 func (bus *EventBus) Publish(topic string, args ...interface{}) error {
-	bus.lock.Lock() // will unlock if handler is not found or always after setUpPublish
-	defer bus.lock.Unlock()
+	bus.lock.RLock() // will unlock if handler is not found or always after setUpPublish
+	defer bus.lock.RUnlock()
 	if handlers, ok := bus.handlers[topic]; ok && 0 < len(handlers) {
 		// Handlers slice may be changed by removeHandler and Unsubscribe during iteration,
 		// so make a copy and iterate the copied slice.
